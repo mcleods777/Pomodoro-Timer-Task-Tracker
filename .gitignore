@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Logs
+*.log
+
+# Data files (uncomment if you don't want to include sample data)
+# *.json
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# MacOS specific
+.DS_Store
