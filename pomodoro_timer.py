@@ -4,9 +4,8 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
-import csv
 import webbrowser
-import winsound  # For playing sounds on Windows
+import csv
 
 class PomodoroTimer:
     def __init__(self, root):
@@ -367,4 +366,203 @@ class PomodoroTimer:
             self.pause_button.config(state=tk.DISABLED)
             
             # If we're pausing a Pomodoro (not a break), record the session
-            if self.current_mode == "Pomodoro" and self
+            if self.current_mode == "Pomodoro" and self.task_start_time:
+                self.record_task_session()
+                # Reset task start time to prevent double-recording
+                self.task_start_time = None
+    
+    def reset_timer(self):
+        # If we're resetting a running Pomodoro, record the session
+        if self.timer_running and self.current_mode == "Pomodoro" and self.task_start_time:
+            self.record_task_session()
+        
+        self.timer_running = False
+        
+        # Only reset the time based on the current mode
+        if self.current_mode == "Pomodoro":
+            self.current_time = self.pomodoro_time
+        elif self.current_mode == "Short Break":
+            self.current_time = self.short_break_time
+        else:
+            self.current_time = self.long_break_time
+        
+        self.update_timer_display()
+        self.start_button.config(state=tk.NORMAL)
+        self.pause_button.config(state=tk.DISABLED)
+        
+        # Reset task start time
+        self.task_start_time = None
+    
+    def record_task_session(self):
+        # Only record if we have a valid start time and task
+        if not self.task_start_time or not self.current_task or not self.current_project:
+            return
+            
+        end_time = datetime.now()
+        duration = end_time - self.task_start_time
+        
+        # Only record sessions that are at least 1 minute long
+        if duration.total_seconds() < 60:
+            return
+            
+        # Create session record
+        session = {
+            "start_time": self.task_start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "project": self.current_project,
+            "task": self.current_task.replace(f"{self.current_project}: ", ""),
+            "task_key": self.current_task,
+            "duration_seconds": duration.total_seconds()
+        }
+        
+        # Add to sessions and save
+        self.task_sessions.append(session)
+        self.save_data()
+        
+        # Update the sessions tree
+        self.populate_sessions_tree()
+        
+        # Display confirmation message
+        messagebox.showinfo("Session Recorded", 
+                           f"Session recorded:\nProject: {self.current_project}\nTask: {session['task']}\nDuration: {self.format_duration(duration.total_seconds())}")
+    
+    def format_duration(self, seconds):
+        """Format duration in seconds to mm:ss format"""
+        minutes = int(seconds // 60)
+        seconds = int(seconds % 60)
+        return f"{minutes:02d}:{seconds:02d}"
+    
+    def populate_sessions_tree(self):
+        """Populate the sessions tree with filtered sessions based on selected date range"""
+        # Clear existing items
+        for item in self.sessions_tree.get_children():
+            self.sessions_tree.delete(item)
+        
+        # Determine date range based on selection
+        today = datetime.now().date()
+        date_filter = self.date_var.get()
+        
+        start_date = None
+        if date_filter == "Today":
+            start_date = today
+        elif date_filter == "Yesterday":
+            start_date = today - timedelta(days=1)
+            end_date = start_date
+        elif date_filter == "Last 7 Days":
+            start_date = today - timedelta(days=6)
+        elif date_filter == "Last 30 Days":
+            start_date = today - timedelta(days=29)
+        # All Time has no start date filter
+        
+        # Filter sessions based on date range
+        filtered_sessions = []
+        for session in self.task_sessions:
+            session_date = datetime.fromisoformat(session["start_time"]).date()
+            
+            if date_filter == "Today" and session_date == today:
+                filtered_sessions.append(session)
+            elif date_filter == "Yesterday" and session_date == start_date:
+                filtered_sessions.append(session)
+            elif date_filter == "Last 7 Days" and start_date <= session_date <= today:
+                filtered_sessions.append(session)
+            elif date_filter == "Last 30 Days" and start_date <= session_date <= today:
+                filtered_sessions.append(session)
+            elif date_filter == "All Time":
+                filtered_sessions.append(session)
+        
+        # Sort sessions by start time (most recent first)
+        filtered_sessions.sort(key=lambda x: x["start_time"], reverse=True)
+        
+        # Add sessions to tree
+        for session in filtered_sessions:
+            start_time = datetime.fromisoformat(session["start_time"])
+            date_str = start_time.strftime("%Y-%m-%d")
+            time_str = start_time.strftime("%H:%M")
+            project = session["project"]
+            task = session["task"]
+            duration = self.format_duration(session["duration_seconds"])
+            
+            self.sessions_tree.insert("", tk.END, values=(date_str, time_str, project, task, duration))
+        
+        # Update the label to show count
+        count = len(filtered_sessions)
+        range_text = date_filter
+        if count == 0:
+            self.logger.info(f"No sessions found for {range_text}")
+        else:
+            self.logger.info(f"Showing {count} sessions for {range_text}")
+    
+    def export_daily_report(self):
+        today = datetime.now().date()
+        self.export_report(today, today, "daily")
+    
+    def export_weekly_report(self):
+        today = datetime.now().date()
+        start_of_week = today - timedelta(days=today.weekday())
+        self.export_report(start_of_week, today, "weekly")
+    
+    def view_data_file(self):
+        """Open the JSON data file in the default text editor"""
+        try:
+            # Check if file exists first
+            if not os.path.exists(self.data_file):
+                messagebox.showinfo("File Not Found", "The data file has not been created yet.")
+                return
+                
+            # Open the JSON file in the default application
+            webbrowser.open(self.data_file)
+            self.logger.info(f"Opened data file for viewing: {self.data_file}")
+        except Exception as e:
+            self.logger.error(f"Error opening data file: {str(e)}")
+            messagebox.showerror("Error", f"Could not open data file: {str(e)}")
+            
+    def export_report(self, start_date, end_date, report_type):
+        # Filter sessions in the given date range
+        filtered_sessions = []
+        
+        for session in self.task_sessions:
+            session_date = datetime.fromisoformat(session["start_time"]).date()
+            if start_date <= session_date <= end_date:
+                filtered_sessions.append(session)
+        
+        if not filtered_sessions:
+            messagebox.showinfo("No Data", f"No task sessions found for the {report_type} report period.")
+            return
+        
+        # Ask for save location
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=f"pomodoro_{report_type}_report_{start_date}.csv"
+        )
+        
+        if not filename:
+            return
+        
+        # Write to CSV
+        with open(filename, 'w', newline='') as csvfile:
+            fieldnames = ['Date', 'Start Time', 'End Time', 'Project', 'Task', 'Duration (min)']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            writer.writeheader()
+            for session in filtered_sessions:
+                start_time = datetime.fromisoformat(session["start_time"])
+                end_time = datetime.fromisoformat(session["end_time"])
+                duration_min = session["duration_seconds"] / 60
+                
+                writer.writerow({
+                    'Date': start_time.strftime("%Y-%m-%d"),
+                    'Start Time': start_time.strftime("%H:%M:%S"),
+                    'End Time': end_time.strftime("%H:%M:%S"),
+                    'Project': session["project"],
+                    'Task': session["task"],
+                    'Duration (min)': f"{duration_min:.1f}"
+                })
+        
+        messagebox.showinfo("Report Exported", f"The {report_type} report has been exported to {filename}")
+        self.logger.info(f"Exported {report_type} report with {len(filtered_sessions)} sessions to {filename}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = PomodoroTimer(root)
+    root.mainloop()
